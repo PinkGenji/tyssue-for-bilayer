@@ -1,15 +1,15 @@
-import logging
 import os
-import traceback
 import warnings
-from collections import defaultdict
+import traceback
+import logging
+import pandas as pd
+import numpy as np
+
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-
-from .objects import Epithelium
+from collections import defaultdict
 from .sheet import Sheet
+from .objects import Epithelium
 
 logger = logging.getLogger(name=__name__)
 
@@ -28,20 +28,12 @@ These non existent columns will not be saved."""
 
 
 class History:
-    """This class handles recording and retrieving time series
+    """ This class handles recording and retrieving time series
     of sheet objects.
 
     """
 
-    def __init__(
-        self,
-        sheet,
-        save_every=None,
-        dt=None,
-        save_only=None,
-        extra_cols=None,
-        save_all=True,
-    ):
+    def __init__(self, sheet, save_every=None, dt=None, save_only=None, extra_cols=None, save_all=True):
         """Creates a `SheetHistory` instance.
 
         Parameters
@@ -60,14 +52,14 @@ class History:
         """
         if extra_cols is not None:
             warnings.warn(
-                "extra_cols and save_all parameters are deprecated."
-                " Use save_only instead. "
-            )
+                "extra_cols and save_all parameters are deprecated. Use save_only instead. ")
+
+        extra_cols = {
+            k: list(sheet.datasets[k].columns) for k in sheet.datasets
+        }
 
         if save_only is not None:
-            extra_cols = defaultdict(list, **save_only)
-        else:
-            extra_cols = {k: list(sheet.datasets[k].columns) for k in sheet.datasets}
+            extra_cols = defaultdict(list, **extra_cols)
 
         self.sheet = sheet
 
@@ -85,7 +77,7 @@ class History:
         vcols = list(set(vcols))
         self.vcols = _filter_columns(vcols, sheet.vert_df.columns, "vertex")
         _vert_h = sheet.vert_df[self.vcols].reset_index(drop=False)
-        if "time" not in self.vcols:
+        if not "time" in self.vcols:
             _vert_h["time"] = 0
         self.datasets["vert"] = _vert_h
         self.columns["vert"] = self.vcols
@@ -93,7 +85,7 @@ class History:
         fcols = extra_cols["face"]
         self.fcols = _filter_columns(fcols, sheet.face_df.columns, "face")
         _face_h = sheet.face_df[self.fcols].reset_index(drop=False)
-        if "time" not in self.fcols:
+        if not "time" in self.fcols:
             _face_h["time"] = 0
         self.datasets["face"] = _face_h
         self.columns["face"] = self.fcols
@@ -102,7 +94,7 @@ class History:
             ccols = extra_cols["cell"]
             self.ccols = _filter_columns(ccols, sheet.cell_df.columns, "cell")
             _cell_h = sheet.cell_df[self.ccols].reset_index(drop=False)
-            if "time" not in self.ccols:
+            if not "time" in self.ccols:
                 _cell_h["time"] = 0
             self.datasets["cell"] = _cell_h
             self.columns["cell"] = self.ccols
@@ -112,7 +104,7 @@ class History:
         ecols = list(set(ecols))
         self.ecols = _filter_columns(ecols, sheet.edge_df.columns, "edge")
         _edge_h = sheet.edge_df[self.ecols].reset_index(drop=False)
-        if "time" not in self.ecols:
+        if not "time" in self.ecols:
             _edge_h["time"] = 0
         self.datasets["edge"] = _edge_h
         self.columns["edge"] = self.ecols
@@ -128,6 +120,7 @@ class History:
 
         """
         with pd.HDFStore(hf5file, "a") as store:
+
             for key, df in self.datasets.items():
                 kwargs = {"data_columns": ["time"]}
                 if "segment" in df.columns:
@@ -174,17 +167,17 @@ class History:
                 hist = self.datasets[element]
                 cols = self.columns[element]
                 df = self.sheet.datasets[element][cols].reset_index(drop=False)
-                if "time" not in cols:
-                    times = pd.Series(np.ones((df.shape[0],)) * self.time, name="time")
-                    df = pd.concat([df, times], ignore_index=False, axis=1, sort=False)
-                else:
-                    df["time"] = self.time
-
+                if not "time" in cols:
+                    times = pd.Series(
+                        np.ones((df.shape[0],)) * self.time, name="time")
+                    df = pd.concat(
+                        [df, times], ignore_index=False, axis=1, sort=False)
                 if self.time in hist["time"]:
                     # erase previously recorded time point
                     hist = hist[hist["time"] != self.time]
 
-                hist = pd.concat([hist, df], ignore_index=True, axis=0, sort=False)
+                hist = pd.concat(
+                    [hist, df], ignore_index=True, axis=0, sort=False)
 
                 self.datasets[element] = hist
 
@@ -193,14 +186,14 @@ class History:
     def retrieve(self, time):
         """Return datasets at time `time`.
 
-        If a specific dataset was not recorded at time time,
-        the closest record before that time is used.
+        If a specific dataset was not recorded at time time, the closest record before that
+        time is used.
         """
         if time > self.datasets["vert"]["time"].values[-1]:
             warnings.warn(
                 """
 The time argument you requested is bigger than the maximum recorded time,
-are you sure you passed the time stamp as parameter, and not an index ?
+are you sure you pass time in parameter and not an index ?
 """
             )
         sheet_datasets = {}
@@ -216,55 +209,14 @@ are you sure you passed the time stamp as parameter, and not an index ?
         )
 
     def __iter__(self):
-        """Iterates over all the time points of the history"""
+
         for t in self.time_stamps:
             sheet = self.retrieve(t)
             yield t, sheet
 
-    def slice(self, start=0, stop=None, size=None, endpoint=True):
-        """Returns a slice of the history's time_stamps array
-
-        The slice is over or under sampled to have exactly size point
-        between start and stop
-        """
-        if size is not None:
-            if stop is not None:
-                time_stamps = self.time_stamps[start : stop + int(endpoint)]
-            else:
-                time_stamps = self.time_stamps
-            indices = np.round(
-                np.linspace(0, time_stamps.size + 1, size, endpoint=True)
-            ).astype(int)
-            times = time_stamps.take(indices.clip(max=time_stamps.size - 1))
-        elif stop is not None:
-            times = self.time_stamps[start : stop + int(endpoint)]
-        else:
-            times = self.time_stamps
-        return times
-
-    def browse(self, start=0, stop=None, size=None, endpoint=True):
-        """Returns an iterator over part of the history
-
-        Parameters
-        ----------
-
-        start: int, index of the first time point
-        stop: int, index of the last time point
-        size: int, the number of time points to return
-        endpoint: bool, wether to include the stop time point (default True)
-
-        Returns
-        -------
-        iterator over (t, sheet(t)) for the retrieved time points
-
-
-        """
-        for t in self.slice(start=start, stop=stop, size=size, endpoint=endpoint):
-            yield t, self.retrieve(t)
-
 
 class HistoryHdf5(History):
-    """This class handles recording and retrieving time series
+    """ This class handles recording and retrieving time series
     of sheet objects.
 
     """
@@ -278,7 +230,7 @@ class HistoryHdf5(History):
         hf5file="",
         overwrite=False,
     ):
-        """Creates a `HistoryHdf5` instance.
+        """Creates a `SheetHistory` instance.
 
         Use the `from_archive` class method to re-open a saved history file
 
@@ -290,27 +242,27 @@ class HistoryHdf5(History):
         save_only : dictionnary with sheet.datasets as keys and list of
             columns as values. Default None
         hf5file : string, define the path of the HDF5 file
-        overwrite : bool, Overwrite or not the file if it is already exist.
-            Default False
+        overwrite : bool, Overwrite or not the file if it is already exist. Default False
+
+
+
+
         """
+        logger.warning(
+            "extra_cols and save_all parameters are deprecated. Use save_only instead. ")
+
         if not hf5file:
             warnings.warn(
-                "No directory is given. The HDF5 file will be saved"
-                " in the working directory as out.hf5."
+                "No directory is given. The HDF5 file will be saved in the working directory as out.hf5."
             )
             self.hf5file = Path(os.getcwd()) / "out.hf5"
         else:
             self.hf5file = Path(hf5file)
 
         if self.hf5file.exists():
-            with pd.HDFStore(self.hf5file, "r") as file:
-                self._time_stamps = file.select("vert", columns=["time"])[
-                    "time"
-                ].unique()
-
             if overwrite:
                 tb = traceback.extract_stack(limit=2)
-                if "from_archive" not in tb[0].name:
+                if not "from_archive" in tb[0].name:
                     warnings.warn(
                         "The file already exist and will be overwritten."
                         " This is normal if you reopened an archive"
@@ -332,9 +284,12 @@ class HistoryHdf5(History):
                             )
                         )
                         break
-
-        else:
-            self._time_stamps = np.empty((0,))
+        if sheet is None:
+            last = self.time_stamps[-1]
+            with pd.HDFStore(self.hf5file, "r") as file:
+                keys = file.keys()
+            if "\cell" in keys:
+                sheet = Epithelium
 
         History.__init__(self, sheet, save_every, dt, save_only)
         self.dtypes = {
@@ -369,14 +324,9 @@ class HistoryHdf5(History):
 
     @property
     def time_stamps(self, element="vert"):
-        if not self._time_stamps.shape[0]:
-            with pd.HDFStore(self.hf5file, "r") as file:
-                self._time_stamps = file.select("vert", columns=["time"])[
-                    "time"
-                    ].unique()
-
-        return self._time_stamps
-
+        with pd.HDFStore(self.hf5file, "r") as file:
+            times = file.select(element, columns=["time"])["time"].unique()
+        return times
 
     def record(self, time_stamp=None, sheet=None):
         """Appends a copy of the sheet datasets to the history HDF file.
@@ -396,61 +346,62 @@ class HistoryHdf5(History):
         else:
             self.time += 1.0
 
-        # invalidate _time_stamp cache:
-        self._time_stamps = np.empty((0,))
-
-
         dtypes_ = {k: df.dtypes for k, df in self.sheet.datasets.items()}
 
         for element, df in self.sheet.datasets.items():
-            old_types = self.dtypes[element].to_dict()
-            new_types = {k: dtypes_[element].to_dict()[k] for k in old_types.keys()}
-
-            if new_types != old_types:
-                changed_type = {
-                    k: old_types[k]
-                    for k in old_types
-                    if k in new_types and old_types[k] != new_types[k]
-                }
-                raise ValueError(
-                    f"There is a change of datatype in {element} table"
-                    f" in {changed_type} columns"
+            diff_col = set(dtypes_[element].keys()).difference(
+                set(self.dtypes[element].keys())
+            )
+            if diff_col:
+                warnings.warn(
+                    "New columns {} will not be saved in the {} table".format(
+                        diff_col, element
+                    )
                 )
+            else:
+                old_types = self.dtypes[element].to_dict()
+                new_types = dtypes_[element].to_dict()
+                if new_types != old_types:
+                    changed_type = {
+                        k: old_types[k]
+                        for k in old_types
+                        if k in new_types and old_types[k] != new_types[k]
+                    }
+                    raise ValueError(
+                        "There is a change of datatype in {} table in {} columns".format(
+                            element, changed_type
+                        )
+                    )
 
         if (self.save_every is None) or (
             self.index % (int(self.save_every / self.dt)) == 0
         ):
             for element, df in self.sheet.datasets.items():
-                times = pd.Series(np.ones((df.shape[0],)) * self.time, name="time")
+                times = pd.Series(
+                    np.ones((df.shape[0],)) * self.time, name="time")
                 df = df[self.columns[element]]
-                df = pd.concat([df, times], ignore_index=False, axis=1, sort=False)
+                df = pd.concat([df, times], ignore_index=False,
+                               axis=1, sort=False)
                 kwargs = {"data_columns": ["time"]}
                 if "segment" in df.columns:
                     kwargs["min_itemsize"] = {"segment": 8}
                 with pd.HDFStore(self.hf5file, "a") as store:
-                    if (
-                        element in store
-                        and store.select(element, where=f"time == {self.time}")[
-                            "time"
-                        ].shape[0]
-                        > 0
-                    ):
+                    if element in store and store.select(element, where=f"time == {self.time}")['time'].shape[0] > 0:
                         store.remove(key=element, where=f"time == {self.time}")
                     store.append(key=element, value=df, **kwargs)
 
         self.index += 1
 
     def retrieve(self, time):
-        """Returns datasets at time `time`.
+        """Return datasets at time `time`.
 
-        If a specific dataset was not recorded at time time,
-        the closest record before that time is used.
+        If a specific dataset was not recorded at time time, the closest record before that
+        time is used.
         """
         times = self.time_stamps
         if time > times[-1]:
             warnings.warn(
-                "The time argument you passed is bigger than the maximum recorded time,"
-                " are you sure you pass time in parameter and not an index ? "
+                "The time argument you passed is bigger than the maximum recorded time, are you sure you pass time in parameter and not an index ? "
             )
 
         time = times[np.argmin(np.abs(times - time))]
@@ -462,29 +413,8 @@ class HistoryHdf5(History):
         sheet = type(self.sheet)(
             f"{self.sheet.identifier}_{time:04.3f}", sheet_datasets, self.sheet.specs
         )
-        sheet.coords = self.sheet.coords
         sheet.edge_df.index.rename("edge", inplace=True)
         return sheet
-
-    def retrieve_columns(self, element, columns):
-        """
-        Return a table with the selected columns from the given element
-
-        Parameters
-        ----------
-        element: str
-            either 'vert', 'edge', 'face' or 'cell'
-        columns: list of str
-            a list of columns to retrieve
-
-
-        """
-        with pd.HDFStore(self.hf5file, "r") as store:
-            data = store.select(
-                element,
-                columns=columns,
-            )
-        return data
 
 
 def _retrieve(dset, time):

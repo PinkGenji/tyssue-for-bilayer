@@ -7,13 +7,14 @@ from math import tau
 import numpy as np
 import pandas as pd
 
-from ..config.geometry import flat_sheet, planar_sheet
+from ..config.geometry import flat_sheet
 from .utils import make_df
 
 
 def hexa_grid2d(nx, ny, distx, disty, noise=None):
-    """Creates an hexagonal grid of points"""
-    cy, cx = np.mgrid[0:ny, 0:nx]
+    """Creates an hexagonal grid of points
+    """
+    cy, cx = np.mgrid[0:ny+2, 0:nx+2]
     cx = cx.astype(float)
     cy = cy.astype(float)
     cx[::2, :] += 0.5
@@ -24,11 +25,14 @@ def hexa_grid2d(nx, ny, distx, disty, noise=None):
     if noise is not None:
         pos_noise = np.random.normal(scale=noise, size=centers.shape)
         centers += pos_noise
+# uncomment the following line to get a voronoi diagram with flat top/bot.
+#    centers = np.flip(centers,1)
     return centers
 
 
 def hexa_grid3d(nx, ny, nz, distx=1.0, disty=1.0, distz=1.0, noise=None):
-    """Creates an hexagonal grid of points"""
+    """Creates an hexagonal grid of points
+    """
     cz, cy, cx = np.mgrid[0:nz, 0:ny, 0:nx]
     cx = cx.astype(float)
     cy = cy.astype(float)
@@ -132,8 +136,7 @@ def hexa_cylinder(
         points_zt = np.vstack((points_tz[:, 1], points_tz[:, 0])).T
     else:
         raise ValueError(
-            f"Orientation should either be 'transverse' or 'longitudinal',"
-            f" not {orientation}"
+            f"Orientation should either be 'transverse' or 'longitudinal', not {orientation}"
         )
 
     points_zt[:, 0] = points_zt[:, 0] * radius
@@ -226,7 +229,7 @@ def three_faces_sheet_array():
     return points, edges, (Nc, Nv, Ne)
 
 
-def three_faces_sheet(zaxis=True):
+def three_faces_sheet(zaxis=False):
     """
     Creates the apical junctions mesh of three packed hexagonal faces.
     If `zaxis` is `True` (defaults to False), adds a `z` coordinates,
@@ -277,10 +280,7 @@ def three_faces_sheet(zaxis=True):
 
     edge_idx = pd.Index(range(_edge_e_idx.shape[0]), name="edge")
 
-    if zaxis:
-        specifications = flat_sheet()
-    else:
-        specifications = planar_sheet()
+    specifications = flat_sheet()
 
     # ## Faces DataFrame
     face_df = make_df(index=face_idx, spec=specifications["face"])

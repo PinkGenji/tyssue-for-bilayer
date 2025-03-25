@@ -1,9 +1,7 @@
-"""This module provides utlities to modify an input tissue through
-extrusion or subdivision
+"""This module provides utlities to modify an input tissue through extrusion or subdivision
 """
-import numpy as np
 import pandas as pd
-
+import numpy as np
 from ..config.geometry import bulk_spec
 
 
@@ -137,11 +135,8 @@ def extrude(apical_datasets, method="homotecy", scale=0.3, vector=[0, 0, -1]):
     for elem in ["vert", "edge", "face", "cell"]:
         datasets[elem].index.name = elem
         for col, value in specs[elem].items():
-            if col not in datasets[elem]:
+            if not col in datasets[elem]:
                 datasets[elem][col] = value
-
-    datasets["face"]["id"] = np.arange(datasets["face"].shape[0])
-    datasets["cell"]["id"] = np.arange(datasets["cell"].shape[0])
 
     if (method == "normals") and (scale < 0):
         datasets["edge"][["srce", "trgt"]] = datasets["edge"][["trgt", "srce"]]
@@ -217,7 +212,7 @@ def subdivide_faces(eptm, faces):
     remaining = eptm.face_df.index.delete(faces)
     untouched_faces = eptm.face_df.loc[remaining]
     edge_df = pd.concat([eptm.edge_df[eptm.edge_df["face"] == face] for face in faces])
-    verts = frozenset(edge_df["srce"])
+    verts = set(edge_df["srce"])
     vert_df = eptm.vert_df.loc[verts]
 
     Nsf = face_df.shape[0]

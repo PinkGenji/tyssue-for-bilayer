@@ -5,9 +5,10 @@ Apoptosis event module
 
 """
 
-from ...geometry.sheet_geometry import SheetGeometry
 from ...utils.decorators import face_lookup
-from .actions import ab_pull, decrease, exchange, remove
+from ...geometry.sheet_geometry import SheetGeometry
+
+from .actions import decrease, ab_pull, exchange, remove
 from .basic_events import contraction
 
 default_apoptosis_spec = {

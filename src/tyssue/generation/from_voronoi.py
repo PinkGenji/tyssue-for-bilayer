@@ -1,7 +1,8 @@
-import numpy as np
 import pandas as pd
+import numpy as np
 
-from ..config.geometry import bulk_spec, planar_spec
+from ..config.geometry import planar_spec, bulk_spec, flat_sheet
+
 from .utils import make_df
 
 """

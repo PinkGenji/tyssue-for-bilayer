@@ -1,10 +1,12 @@
 import logging
 import warnings
-from itertools import combinations
 
 import numpy as np
+
 import pandas as pd
 
+
+from itertools import combinations
 from ..utils.connectivity import face_face_connectivity
 
 logger = logging.getLogger(name=__name__)
@@ -31,12 +33,12 @@ def split_vert(sheet, vert, face, to_rewire, epsilon, recenter=False):
     This will leave opened faces and cells
 
     """
-    logger.debug("splitting vertex %d", vert)
+    logger.debug(f"splitting vertex {vert}")
 
     # Add a vertex
     this_vert = sheet.vert_df.loc[vert:vert]  # avoid type munching
-    sheet.vert_df = pd.concat([sheet.vert_df, this_vert], ignore_index=True)
-
+    sheet.vert_df = sheet.vert_df.append(this_vert, ignore_index=True)
+    # reset datatypes
     new_vert = sheet.vert_df.index[-1]
     # Move it towards the face center
     r_ia = sheet.face_df.loc[face, sheet.coords] - sheet.vert_df.loc[vert, sheet.coords]
@@ -107,25 +109,30 @@ def add_vert(eptm, edge):
     ]
 
     new_vert = eptm.vert_df.loc[srce:srce]
-    eptm.vert_df = pd.concat([eptm.vert_df, new_vert], ignore_index=True)
+    eptm.vert_df = eptm.vert_df.append(new_vert, ignore_index=True)
     new_vert = eptm.vert_df.index[-1]
     eptm.vert_df.loc[new_vert, eptm.coords] = eptm.vert_df.loc[
         [srce, trgt], eptm.coords
-    ].mean(numeric_only=True)
+    ].mean()
 
-    eptm.edge_df.loc[parallels.index, "trgt"] = new_vert
-    eptm.edge_df = pd.concat([eptm.edge_df, parallels], ignore_index=True)
-    new_edges = eptm.edge_df.index[-parallels.index.size :]
-    eptm.edge_df.loc[new_edges, "srce"] = new_vert
-    eptm.edge_df.loc[new_edges, "trgt"] = trgt
+    new_edges = []
+
+    for p, p_data in parallels.iterrows():
+        eptm.edge_df.loc[p, "trgt"] = new_vert
+        eptm.edge_df = eptm.edge_df.append(p_data, ignore_index=True)
+        new_edge = eptm.edge_df.index[-1]
+        eptm.edge_df.loc[new_edge, "srce"] = new_vert
+        eptm.edge_df.loc[new_edge, "trgt"] = trgt
+        new_edges.append(new_edge)
 
     new_opp_edges = []
-    if len(opposites.index):
-        eptm.edge_df.loc[opposites.index, "srce"] = new_vert
-        eptm.edge_df = pd.concat([eptm.edge_df, opposites], ignore_index=True)
-        new_opp_edges = eptm.edge_df.index[-opposites.index.size :]
-        eptm.edge_df.loc[new_opp_edges, "trgt"] = new_vert
-        eptm.edge_df.loc[new_opp_edges, "srce"] = trgt
+    for o, o_data in opposites.iterrows():
+        eptm.edge_df.loc[o, "srce"] = new_vert
+        eptm.edge_df = eptm.edge_df.append(o_data, ignore_index=True)
+        new_opp_edge = eptm.edge_df.index[-1]
+        eptm.edge_df.loc[new_opp_edge, "trgt"] = new_vert
+        eptm.edge_df.loc[new_opp_edge, "srce"] = trgt
+        new_opp_edges.append(new_opp_edge)
 
     # ## Sheet special case
     if len(new_edges) == 1:
@@ -141,7 +148,7 @@ def close_face(eptm, face):
     """Closes the face if a single edge is missing.
 
     This function **does not** close the adjacent and opposite
-    faces. Returns the index of the new edge if created, otherwise None
+    faces.
     """
     logger.debug(f"closing face {face}")
     face_edges = eptm.edge_df[eptm.edge_df["face"] == face]
@@ -149,8 +156,8 @@ def close_face(eptm, face):
     trgts = set(face_edges["trgt"])
 
     if srces == trgts:
-        logger.debug("Face %d already closed", face)
-        return None
+        logger.info("Face {} already closed".format(face))
+        return
     try:
         (single_srce,) = srces.difference(trgts)
         (single_trgt,) = trgts.difference(srces)
@@ -158,11 +165,10 @@ def close_face(eptm, face):
         print("Closing only possible with exactly two dangling vertices")
         raise err
 
-    eptm.edge_df = pd.concat([eptm.edge_df, face_edges.iloc[0:1]], ignore_index=True)
+    eptm.edge_df = eptm.edge_df.append(face_edges.iloc[0:1], ignore_index=True)
     eptm.edge_df.index.name = "edge"
     new_edge = eptm.edge_df.index[-1]
     eptm.edge_df.loc[new_edge, ["srce", "trgt"]] = single_trgt, single_srce
-    return new_edge
 
 
 def drop_two_sided_faces(eptm):
@@ -177,26 +183,20 @@ def drop_two_sided_faces(eptm):
         return
 
     two_sided = eptm.face_df[num_sides < 3].index
-    logger.debug("dropping %d 2-sided faces", two_sided.size)
+    logger.debug(f"dropping {two_sided.shape} 2-sided faces")
     edges = eptm.edge_df[eptm.edge_df["face"].isin(two_sided)].index
     eptm.edge_df.drop(edges, axis=0, inplace=True)
     eptm.face_df.drop(two_sided, axis=0, inplace=True)
 
 
 def remove_face(sheet, face):
-    """Removes a face from the mesh.
-
-    Returns the index of the new vert that replaces the face."""
-    logger.debug("removing face %d", face)
+    """Removes a face from the mesh."""
+    logger.debug(f"removing face {face}")
 
     edges = sheet.edge_df[sheet.edge_df["face"] == face]
     verts = edges["srce"].unique()
-
-    new_vert_data = sheet.vert_df.loc[verts[0] : verts[0]].copy()
-    new_vert_data[sheet.coords] = sheet.vert_df.loc[verts, sheet.coords].mean()
-    sheet.vert_df = pd.concat(
-        [sheet.vert_df, pd.DataFrame(new_vert_data)], ignore_index=True
-    )
+    new_vert_data = sheet.vert_df.loc[verts].mean()
+    sheet.vert_df = sheet.vert_df.append(new_vert_data, ignore_index=True)
     new_vert = sheet.vert_df.index[-1]
 
     # collapse all edges connected to the face vertices
@@ -210,9 +210,6 @@ def remove_face(sheet, face):
         warnings.warn(f"something fishy with face {face}")
         sheet.edge_df.drop(remanent, axis=0, inplace=True)
 
-    sheet.lineage.add_node(str(sheet.face_df.loc[face]['unique_id']),
-                           color='black')
-
     sheet.face_df.drop(face, axis=0, inplace=True)
     sheet.vert_df.drop(verts, axis=0, inplace=True)
 
@@ -223,7 +220,7 @@ def remove_face(sheet, face):
     sheet.reset_index()
     sheet.reset_topo()
 
-    return new_vert
+    return 0
 
 
 def collapse_edge(sheet, edge, reindex=True, allow_two_sided=False):
@@ -231,13 +228,9 @@ def collapse_edge(sheet, edge, reindex=True, allow_two_sided=False):
     a rosette structure.
 
     If `reindex` is `True` (the default), resets indexes and topology data.
-    The edge is collapsed on the smaller of the srce, trgt indexes
-    (to minimize reindexing impact)
-
-    Returns the index of the collapsed edge's remaining vertex (its srce)
+    The edge is collapsed on the smaller of the srce, trgt indexes (to minimize reindexing impact)
 
     """
-
     logger.debug("collapsing edge %d", edge)
     srce, trgt = np.sort(sheet.edge_df.loc[edge, ["srce", "trgt"]]).astype(int)
 
@@ -272,7 +265,6 @@ def collapse_edge(sheet, edge, reindex=True, allow_two_sided=False):
         sheet.reset_index()
         sheet.reset_topo()
     return srce
-
 
 def merge_vertices(sheet, vert0, vert1, reindex=True):
     """Merge the two vertices vert0 and vert1 iff they are linked by an edge
@@ -355,12 +347,10 @@ def condition_4ii(eptm):
 
         pairs = set(frozenset(p) for p in faces)
 
+
         cols = ['srce', 'trgt', 'face', 'cell', 'length', 'sub_area']
-        edges = eptm.edge_df[
-            eptm.edge_df["face"].isin(faces[0])
-        ][cols].sort_values("face")
-        all_edges = eptm.edge_df.loc[eptm.edge_df["face"].isin(
-            set(faces.ravel())), cols].sort_values("face")
+        edges = eptm.edge_df[eptm.edge_df["face"].isin(faces[0])][cols].sort_values("face")
+        all_edges = eptm.edge_df.loc[eptm.edge_df["face"].isin(set(faces.ravel())), cols].sort_values("face")
 
         all_edges['single'] = all_edges[["srce", "trgt"]].apply(frozenset, axis=1)
 
@@ -368,9 +358,7 @@ def condition_4ii(eptm):
 
         com_vs = set(all_edges.srce)
         for face in ufaces:
-            com_vs = com_vs.intersection(
-                all_edges.loc[all_edges["face"] == face, "srce"]
-            )
+            com_vs = com_vs.intersection(all_edges.loc[all_edges["face"] == face, "srce"])
 
     """
     conmat = face_face_connectivity(eptm, exclude_opposites=True)

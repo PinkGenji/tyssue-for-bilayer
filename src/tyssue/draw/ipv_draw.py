@@ -1,14 +1,13 @@
-"""3D visualisation inside the notebook."""
-
+"""3D visualisation inside the notebook.
+"""
 import warnings
-
 import numpy as np
 import pandas as pd
+from matplotlib import cm
 from ipywidgets import interact
-from matplotlib import colormaps
 
 from ..config.draw import sheet_spec
-from ..utils.utils import get_sub_eptm, spec_updater
+from ..utils.utils import spec_updater, get_sub_eptm
 
 try:
     import ipyvolume as ipv
@@ -22,10 +21,9 @@ $ conda install -c conda-forge ipyvolume
     )
 
 
-def browse_history(
-    history, coords=["x", "y", "z"], start=None, stop=None, size=None, **draw_specs_kw
-):
-    times = history.slice(start, stop, size)
+def browse_history(history, coords=["x", "y", "z"], **draw_specs_kw):
+
+    times = history.time_stamps
     num_frames = times.size
     draw_specs = sheet_spec()
     spec_updater(draw_specs, draw_specs_kw)
@@ -129,17 +127,11 @@ def edge_mesh(sheet, coords, **edge_specs):
     elif hasattr(spec["color"], "__len__"):
         color = _wire_color_from_sequence(spec, sheet)[:, :3]
 
-    if len(coords) == 2:
-        u, v = coords
-        z = np.repeat(0, sheet.Nv)
-    if len(coords) == 3:
-        u, v, w = coords
-        z = sheet.vert_df[w],
-
+    u, v, w = coords
     mesh = ipv.Mesh(
         x=sheet.vert_df[u],
         y=sheet.vert_df[v],
-        z=z,
+        z=sheet.vert_df[w],
         lines=sheet.edge_df[["srce", "trgt"]].astype(dtype=np.uint32),
         color=color,
     )
@@ -197,9 +189,10 @@ def face_mesh(sheet, coords, **face_draw_specs):
 
 
 def _wire_color_from_sequence(edge_spec, sheet):
-    """ """
+    """
+    """
     color_ = edge_spec["color"]
-    cmap = colormaps[edge_spec.get("colormap", "viridis")]
+    cmap = cm.get_cmap(edge_spec.get("colormap", "viridis"))
     if color_.shape in [(sheet.Nv, 3), (sheet.Nv, 4)]:
         return np.asarray(color_)
     if color_.shape == (sheet.Nv,):
@@ -227,7 +220,7 @@ def _wire_color_from_sequence(edge_spec, sheet):
 def _face_color_from_sequence(face_spec, sheet):
     color_ = face_spec["color"]
 
-    cmap = colormaps[face_spec.get("colormap", "viridis")]
+    cmap = cm.get_cmap(face_spec.get("colormap", "viridis"))
     Nf, Ne = sheet.Nf, sheet.Ne
     color_min, color_max = face_spec.get("color_range", (color_.min(), color_.max()))
 

@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
-import vispy as vp
-from matplotlib import colormaps
-from vispy import app, scene
+from matplotlib import cm
 
+import vispy as vp
+from vispy import app, scene
 from ..config.draw import sheet_spec
 from ..utils.utils import spec_updater
 
@@ -67,7 +67,7 @@ def face_visual(sheet, coords=None, **draw_specs_kw):
             columns=["R", "G", "B", "A"][: colors.shape[1]],
         )
     elif colors.shape == (sheet.Nf,):
-        cmap = colormaps[draw_specs.get("colormap", "viridis")]
+        cmap = cm.get_cmap(draw_specs.get("colormap", "viridis"))
         color_min, color_max = draw_specs.get(
             "color_range", (colors.min(), colors.max())
         )
@@ -165,7 +165,8 @@ def edge_visual(sheet, coords=None, **draw_specs_kw):
 
 
 def sheet_view(sheet, coords=None, interactive=True, **draw_specs_kw):
-    """Uses VisPy to display an epithelium"""
+    """Uses VisPy to display an epithelium
+    """
     draw_specs = sheet_spec()
     spec_updater(draw_specs, draw_specs_kw)
 

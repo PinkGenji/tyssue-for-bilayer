@@ -1,2 +1,8 @@
-from . import core, draw, dynamics, geometry, solvers, stores  # noqa: F401
-from .json_parser import load_spec, save_spec  # noqa: F401
+from . import core
+from . import geometry
+from . import dynamics
+from . import solvers
+from . import draw
+from . import stores
+
+from .json_parser import load_spec, save_spec

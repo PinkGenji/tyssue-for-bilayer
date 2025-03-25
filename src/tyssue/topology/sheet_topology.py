@@ -1,11 +1,14 @@
 import logging
+import numpy as np
+from functools import wraps
+
 import warnings
 
-import numpy as np
-import pandas as pd
 
-from .base_topology import add_vert, close_face, collapse_edge, remove_face
+from .base_topology import add_vert, collapse_edge, close_face, remove_face
 from .base_topology import split_vert as base_split_vert
+from tyssue.utils.decorators import do_undo, validate
+
 
 logger = logging.getLogger(name=__name__)
 MAX_ITER = 100
@@ -17,18 +20,13 @@ def split_vert(
     """Splits a vertex towards the center of the face.
 
     This operation removes the  face `face` from the neighborhood of the vertex.
-
-    Returns a list of the new edge's indices in edge_df. This should be two:
-        the edge with vert as the srce and the newly created vertex as the trgt
-        and the reverse edge with vert as the trgt and the new one as the srce
     """
     # Get the value for the length of the new edge
     if epsilon is None:
         epsilon = sheet.settings.get("threshold_length", 0.1) * multiplier
     else:
         warnings.warn(
-            "The epsilon argument is deprecated and will be removed"
-            " in a future version. "
+            "The epsilon argument is deprecated and will be removed in a future version. "
             "The length of the new edge should be set by "
             "`sheet.settings['threshold_length]*multiplier` "
         )
@@ -44,17 +42,14 @@ def split_vert(
     ]
 
     base_split_vert(sheet, vert, face, connected, epsilon, recenter)
-    new_edges = []
     for face_ in connected["face"]:
-        new_edge = close_face(sheet, face_)
-        if new_edge is not None:
-            new_edges.append(new_edge)
+        close_face(sheet, face_)
 
     if reindex:
         sheet.reset_index()
         sheet.reset_topo()
 
-    return new_edges
+    return 0
 
 
 def type1_transition(sheet, edge01, *, remove_tri_faces=True, multiplier=1.5):
@@ -114,6 +109,8 @@ def type1_transition(sheet, edge01, *, remove_tri_faces=True, multiplier=1.5):
     return 0
 
 
+
+
 def cell_division(sheet, mother, geom, angle=None):
     """Causes a cell to divide
 
@@ -134,8 +131,8 @@ def cell_division(sheet, mother, geom, angle=None):
     - Function checks for perodic boundaries if there are, it checks if dividing cell
       rests on an edge of the periodic boundaries if so, it displaces the boundaries
       by a half a period and moves the target cell in the bulk of the tissue. It then
-      performs cell division normally and reverts the periodic boundaries
-      to the original configuration
+      performs cell division normally and reverts the periodic boundaries to the original
+      configuration
     """
 
     if sheet.settings.get("boundaries") is not None:
@@ -162,8 +159,8 @@ def cell_division(sheet, mother, geom, angle=None):
     if edge_a is None:
         return
 
-    vert_a, *_ = add_vert(sheet, edge_a)
-    vert_b, *_ = add_vert(sheet, edge_b)
+    vert_a, new_edge_a, new_opp_edge_a = add_vert(sheet, edge_a)
+    vert_b, new_edge_b, new_opp_edge_b = add_vert(sheet, edge_b)
     sheet.vert_df.index.name = "vert"
     daughter = face_division(sheet, mother, vert_a, vert_b)
 
@@ -204,17 +201,17 @@ def face_division(sheet, mother, vert_a, vert_b):
     # mother = sheet.edge_df.loc[edge_a, 'face']
 
     face_cols = sheet.face_df.loc[mother:mother]
-
-    sheet.face_df = pd.concat([sheet.face_df, face_cols], ignore_index=True)
+    sheet.face_df = sheet.face_df.append(face_cols, ignore_index=True)
     sheet.face_df.index.name = "face"
     daughter = int(sheet.face_df.index[-1])
 
     edge_cols = sheet.edge_df[sheet.edge_df["face"] == mother].iloc[0:1]
-
-    sheet.edge_df = pd.concat([sheet.edge_df, edge_cols, edge_cols], ignore_index=True)
-    new_edge_m = sheet.edge_df.index[-2]
+    sheet.edge_df = sheet.edge_df.append(edge_cols, ignore_index=True)
+    new_edge_m = sheet.edge_df.index[-1]
     sheet.edge_df.loc[new_edge_m, "srce"] = vert_b
     sheet.edge_df.loc[new_edge_m, "trgt"] = vert_a
+
+    sheet.edge_df = sheet.edge_df.append(edge_cols, ignore_index=True)
     new_edge_d = sheet.edge_df.index[-1]
     sheet.edge_df.loc[new_edge_d, "srce"] = vert_a
     sheet.edge_df.loc[new_edge_d, "trgt"] = vert_b
@@ -239,17 +236,6 @@ def face_division(sheet, mother, vert_a, vert_b):
     sheet.edge_df.index.name = "edge"
     sheet.reset_topo()
     return daughter
-
-
-def drop_face(eptm, face, geom, **kwargs):
-    """
-    Removes the face indexed by "face" and all associated edges to allow holes
-    """
-    edge = eptm.edge_df.loc[(eptm.edge_df['face'] == face)].index
-
-    eptm.remove(edge, **kwargs)
-    eptm.sanitize(trim_borders = True)
-    geom.update_all(eptm)
 
 
 def resolve_t1s(sheet, geom, model, solver, max_iter=60):

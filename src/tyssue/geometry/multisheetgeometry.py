@@ -2,7 +2,9 @@ from .sheet_geometry import SheetGeometry
 
 
 class MultiSheetGeometry:
-    """Geometry class for stacked 2D sheets"""
+    """ Geometry class for stacked 2D sheets
+
+    """
 
     @classmethod
     def update_all(cls, msheet):

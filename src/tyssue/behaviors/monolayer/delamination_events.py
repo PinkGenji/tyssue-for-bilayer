@@ -1,10 +1,10 @@
 import logging
 
-from ...topology.bulk_topology import HI_transition, IH_transition
 from ...utils.decorators import cell_lookup
+from ...topology.bulk_topology import IH_transition, HI_transition
+from .actions import shrink, contract, ab_pull_edge
 from ..sheet.basic_events import contraction as sheet_contraction
 from ..sheet.delamination_events import _neighbor_contractile_increase
-from .actions import ab_pull_edge, contract, shrink
 
 logger = logging.getLogger(__name__)
 
@@ -146,10 +146,9 @@ def _constrict_apical(faces_in_cell, monolayer, constriction_spec):
         ].index
         if len(three_lateral):
             face_to_eliminate = three_lateral[0]
-
-            prev_Nf = monolayer.Nf
-            HI_transition(monolayer, face_to_eliminate)
-            monolayer.face_df.loc[prev_Nf:, "contractility"] = 0
+        prev_Nf = monolayer.Nf
+        HI_transition(monolayer, face_to_eliminate)
+        monolayer.face_df.loc[prev_Nf:, "contractility"] = 0
 
     elif len(faces_in_cell) == 4:
         if monolayer.cell_df.loc[cell, "vol"] > constriction_spec["critical_volume"]:

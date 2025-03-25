@@ -7,7 +7,6 @@ from collections import abc
 
 import numpy as np
 import pandas as pd
-
 from ..config.subdiv import bulk_spec
 
 

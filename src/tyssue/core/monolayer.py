@@ -2,13 +2,14 @@
 """
 
 import logging
-
+import numpy as np
 import pandas as pd
-from scipy.spatial import cKDTree
 
-from ..geometry.bulk_geometry import BulkGeometry
+from scipy.spatial import cKDTree
 from .objects import Epithelium
 from .sheet import Sheet
+
+from ..geometry.bulk_geometry import BulkGeometry
 
 logger = logging.getLogger(name=__name__)
 
@@ -168,17 +169,12 @@ class MonolayerWithLamina(Monolayer):
         # place holder face and cell
         lamina_face = self.face_df.index.max() + 1
         lamina_edges["face"] = lamina_face
-
-        self.face_df = pd.concat(
-            [self.face_df, self.face_df.iloc[0:0]], ignore_index=True
-        )
+        self.face_df.append(self.face_df.iloc[0].copy())
         self.face_df.loc[lamina_face, "is_alive"] = 0
 
         lamina_cell = self.cell_df.index.max() + 1
         lamina_edges["cell"] = lamina_cell
-        self.cell_df = pd.concat(
-            [self.cell_df, self.cell_df.iloc[0:0]], ignore_index=True
-        )
+        self.cell_df.append(self.cell_df.iloc[0].copy())
         self.cell_df.loc[lamina_cell, "is_alive"] = 0
 
         lamina_edges.index += self.edge_df.index.max() + 1

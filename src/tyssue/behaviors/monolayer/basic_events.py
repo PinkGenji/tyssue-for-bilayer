@@ -4,8 +4,11 @@ Small event module
 
 
 """
-from ...utils.decorators import cell_lookup
-from .actions import contract
+from ...utils.decorators import face_lookup, cell_lookup
+from ...geometry.sheet_geometry import SheetGeometry
+
+from .actions import grow, contract
+from ..sheet.basic_events import reconnect
 
 default_contraction_spec = {
     "cell_id": -1,

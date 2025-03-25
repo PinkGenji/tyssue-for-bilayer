@@ -3,4 +3,4 @@ Epithelium subsegmentation system
 
 """
 
-from .point_cloud import EdgeSubdiv, FaceGrid  # noqa
+from .point_cloud import EdgeSubdiv, FaceGrid

@@ -1,17 +1,22 @@
-import itertools
 import logging
 import warnings
+import itertools
 
 import numpy as np
 import pandas as pd
 
-from ..core.monolayer import Monolayer
-from ..core.objects import _is_closed_cell, euler_characteristic
-from ..core.sheet import get_opposite
-from ..geometry.utils import rotation_matrix
-from .base_topology import add_vert, close_face, collapse_edge, remove_face
-from .base_topology import split_vert as base_split_vert
 from .sheet_topology import face_division
+from .base_topology import (
+    add_vert,
+    close_face,
+    collapse_edge,
+    remove_face,
+)
+from .base_topology import split_vert as base_split_vert
+from ..geometry.utils import rotation_matrix
+from ..core.objects import euler_characteristic, _is_closed_cell
+from ..core.monolayer import Monolayer
+from ..core.sheet import get_opposite
 
 logger = logging.getLogger(name=__name__)
 MAX_ITER = 10
@@ -27,9 +32,8 @@ def remove_cell(eptm, cell):
     faces = eptm.face_df.loc[edges["face"].unique()]
     oppo = faces["opposite"][faces["opposite"] != -1]
     verts = eptm.vert_df.loc[edges["srce"].unique()].copy()
-    eptm.vert_df = pd.concat(
-        [eptm.vert_df, pd.DataFrame(verts.mean(numeric_only=True))], ignore_index=True
-    )
+
+    eptm.vert_df = eptm.vert_df.append(verts.mean(), ignore_index=True)
     new_vert = eptm.vert_df.index[-1]
 
     eptm.vert_df.loc[new_vert, "segment"] = "basal"
@@ -57,13 +61,13 @@ def close_cell(eptm, cell):
     euler_c = euler_characteristic(face_edges)
 
     if euler_c == 2:
-        logger.info("cell %s is already closed", cell)
+        logger.warning("cell %s is already closed", cell)
         return 0
 
     if euler_c != 1:
         raise ValueError("Cell has more than one hole")
 
-    eptm.face_df = pd.concat([eptm.face_df, eptm.face_df.loc[0:0]], ignore_index=True)
+    eptm.face_df = eptm.face_df.append(eptm.face_df.loc[0:0], ignore_index=True)
     new_face = eptm.face_df.index[-1]
 
     oppo = get_opposite(face_edges, raise_if_invalid=True)
@@ -72,15 +76,14 @@ def close_cell(eptm, cell):
     new_edges[["srce", "trgt"]] = new_edges[["trgt", "srce"]]
     new_edges["face"] = new_face
     new_edges.index = new_edges.index + eptm.edge_df.index.max()
-
-    eptm.edge_df = pd.concat([eptm.edge_df, new_edges], ignore_index=False)
+    eptm.edge_df = eptm.edge_df.append(new_edges, ignore_index=False)
 
     eptm.reset_index()
     eptm.reset_topo()
     return 0
 
 
-def split_vert(eptm, vert, face=None, multiplier=1.5, recenter=False):
+def split_vert(eptm, vert, face=None, multiplier=1.5):
     """Splits a vertex towards a face.
 
     Parameters
@@ -139,12 +142,11 @@ def split_vert(eptm, vert, face=None, multiplier=1.5, recenter=False):
 
     if cells.loc[cell, "size"] == 3:
         logger.info(f"OI for face {face} of cell {cell}")
-        _OI_transition(eptm, all_edges, elements, multiplier, recenter=recenter)
+        _OI_transition(eptm, all_edges, elements, multiplier)
     elif cells.loc[cell, "size"] == 4:
         logger.info(f"OH for face {face} of cell {cell}")
-        _OH_transition(eptm, all_edges, elements, multiplier, recenter=recenter)
+        _OH_transition(eptm, all_edges, elements, multiplier)
     else:
-        logger.info("Nothing happened ")
         return 1
     # Tidy up
     for face in all_edges["face"].unique():
@@ -244,7 +246,7 @@ def get_division_edges(
         direction = [plane_normal[1], -plane_normal[0], 0]
         rot = rotation_matrix(theta, direction)
 
-    cell_verts = frozenset(eptm.edge_df[eptm.edge_df["cell"] == mother]["srce"])
+    cell_verts = set(eptm.edge_df[eptm.edge_df["cell"] == mother]["srce"])
     vert_pos = eptm.vert_df.loc[cell_verts, eptm.coords]
     for coord in eptm.coords:
         vert_pos[coord] -= plane_center[coord]
@@ -307,8 +309,7 @@ def cell_division(
             return_all=True,
         )
     cell_cols = eptm.cell_df.loc[mother:mother]
-
-    eptm.cell_df = pd.concat([eptm.cell_df, cell_cols], ignore_index=True)
+    eptm.cell_df = eptm.cell_df.append(cell_cols, ignore_index=True)
     eptm.cell_df.index.name = "cell"
     daughter = eptm.cell_df.index[-1]
     if "id" not in eptm.cell_df.columns:
@@ -343,7 +344,7 @@ identifier. Consider doing this at initialisation time
 
     # septum
     face_cols = eptm.face_df.iloc[-2:]
-    eptm.face_df = pd.concat([eptm.face_df, face_cols], ignore_index=True)
+    eptm.face_df = eptm.face_df.append(face_cols, ignore_index=True)
     eptm.face_df.index.name = "face"
     septum = eptm.face_df.index[-2:]
 
@@ -351,8 +352,7 @@ identifier. Consider doing this at initialisation time
     num_new_edges = num_v * 2
 
     edge_cols = eptm.edge_df.iloc[-num_new_edges:]
-
-    eptm.edge_df = pd.concat([eptm.edge_df, edge_cols], ignore_index=True)
+    eptm.edge_df = eptm.edge_df.append(edge_cols, ignore_index=True)
     eptm.edge_df.index.name = "edge"
     new_edges = eptm.edge_df.index[-num_new_edges:]
 
@@ -430,7 +430,7 @@ def find_rearangements(eptm):
     edges_HI: set of indexes of short edges
     faces_IH: set of indexes of small triangular faces
     """
-    l_th = eptm.settings.get("threshold_length", 1e-2)
+    l_th = eptm.settings.get("threshold_length", 1e-6)
     shorts = eptm.edge_df[eptm.edge_df["length"] < l_th]
     if not shorts.shape[0]:
         return np.array([]), np.array([])
@@ -441,7 +441,7 @@ def find_rearangements(eptm):
 
 def find_IHs(eptm, shorts=None):
 
-    l_th = eptm.settings.get("threshold_length", 1e-2)
+    l_th = eptm.settings.get("threshold_length", 1e-6)
     if shorts is None:
         shorts = eptm.edge_df[eptm.edge_df["length"] < l_th]
     if not shorts.shape[0]:
@@ -467,7 +467,7 @@ def find_IHs(eptm, shorts=None):
 
 
 def find_HIs(eptm, shorts=None):
-    l_th = eptm.settings.get("threshold_length", 1e-2)
+    l_th = eptm.settings.get("threshold_length", 1e-6)
     if shorts is None:
         shorts = eptm.edge_df[(eptm.edge_df["length"] < l_th)]
     if not shorts.shape[0]:
@@ -480,7 +480,7 @@ def find_HIs(eptm, shorts=None):
 
 
 # @check_condition4
-def IH_transition(eptm, edge, recenter=False):
+def IH_transition(eptm, edge):
     """
     I → H transition as defined in Okuda et al. 2013
     (DOI 10.1007/s10237-012-0430-7).
@@ -490,14 +490,14 @@ def IH_transition(eptm, edge, recenter=False):
     vert = min(srce, trgt)
     collapse_edge(eptm, edge)
 
-    split_vert(eptm, vert, face, recenter=recenter)
+    split_vert(eptm, vert, face)
 
-    logger.info("IH transition on edge %d", edge)
+    logger.info(f"IH transition on edge {edge}")
     return 0
 
 
 # @check_condition4
-def HI_transition(eptm, face, recenter=False):
+def HI_transition(eptm, face):
     """
     H → I transition as defined in Okuda et al. 2013
     (DOI 10.1007/s10237-012-0430-7).
@@ -512,15 +512,14 @@ def HI_transition(eptm, face, recenter=False):
     cells = all_edges.groupby("cell").size()
     cell = cells.idxmin()
     face = all_edges[all_edges["cell"] == cell]["face"].iloc[0]
-    split_vert(eptm, vert, face, recenter=recenter)
+    split_vert(eptm, vert, face)
 
-    logger.info("HI transition on face %d", face)
+    logger.info(f"HI transition on edge {face}")
     return 0
 
 
 def fix_pinch(eptm):
-    """Due to rearangements, some faces in an epithelium will have
-    more than one opposite face.
+    """Due to rearangements, some faces in an epithelium will have more than one opposite face.
 
     This method fixes the issue so we can have a valid epithelium back.
     """

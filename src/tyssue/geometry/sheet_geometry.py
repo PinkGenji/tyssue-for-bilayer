@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from .planar_geometry import PlanarGeometry
-from .utils import rotation_matrices, rotation_matrix
+from .utils import rotation_matrix, rotation_matrices
 
 
 class SheetGeometry(PlanarGeometry):
@@ -123,7 +123,7 @@ class SheetGeometry(PlanarGeometry):
 
         edge_height = sheet.upcast_srce(sheet.vert_df[["height", "rho"]])
         edge_height.set_index(sheet.edge_df["face"], append=True, inplace=True)
-        sheet.face_df[["height", "rho"]] = edge_height.groupby(level="face").mean()
+        sheet.face_df[["height", "rho"]] = edge_height.mean(level="face")
 
     @classmethod
     def reset_scafold(cls, sheet):
@@ -213,8 +213,8 @@ class SheetGeometry(PlanarGeometry):
         vertices are mostly in the u, v plane.
 
         If method is 'normal', face is oriented with it's normal along w
-        if method is 'svd', the u, v, w is determined through
-        singular value decompostion of the face vertices relative  positions.
+        if method is 'svd', the u, v, w is determined through singular value decompostion
+        of the face vertices relative  positions.
 
         svd is slower but more effective at reducing face dimensionality.
 
@@ -320,35 +320,6 @@ class ClosedSheetGeometry(SheetGeometry):
         sheet.settings["lumen_vol"] = sum(lumen_sub_vol)
 
 
-class MidlineBoundaryGeometry(ClosedSheetGeometry):
-    @classmethod
-    def update_all(cls, eptm):
-        super().update_all(eptm)
-        cls.update_delta_boundary(eptm)
-
-    @staticmethod
-    def update_delta_boundary(eptm):
-        midline_boudary_stiffness = eptm.settings.get(
-            "midline_boundary_stiffness", False
-        )
-        # update boundary transgression
-        # leftright = 1|-1 depending on x position at start
-        # x / abs(x) = 1|-1 depending on current x position
-        # (x/abs(x)) - leftright = 0 if both are equal (vert has not crossed midline)
-        #                        = -2 if both are unequal and current x is negative
-        #                        = 2 if both are unequal and current x is positive
-        # hence, take (0|2|-2)*0.5x to get the distance from x axis as a positive number
-
-        if midline_boudary_stiffness is not False:
-            if "leftright" not in eptm.vert_df.columns:
-                eptm.vert_df["leftright"] = np.sign(eptm.vert_df["x"])
-            eptm.vert_df["delta_boundary"] = (
-                (np.sign(eptm.vert_df["x"]) - eptm.vert_df["leftright"])
-                * eptm.vert_df["x"]
-                / 2
-            )
-
-
 class EllipsoidGeometry(ClosedSheetGeometry):
     @staticmethod
     def update_height(eptm):
@@ -378,13 +349,9 @@ class WeightedPerimeterEllipsoidLameGeometry(ClosedSheetGeometry):
     of perimeter is based on weight of each junction.
 
     Meaning if all junction of a cell have the same weight, perimeter is
-    calculated as a usual perimeter calculation
-    .. math::
-         p = \\sum l_{ij}
+    calculated as a usual perimeter calculation (p = l_ij + l_jk + l_km + l_mn + l_ni)
     Otherwise, weight parameter allowed more or less importance of a junction in the
-    perimeter calculation
-    .. math::
-         p = \\sum w_{ij} \\, l_{ij}
+    perimeter calculation (p = w_ij*l_ij + w_jk*l_jk + w_km*l_km + w_mn*l_mn + w_ni*l_ni)
 
     In this geometry, a sphere surrounding the tissue, meaning a force is apply only at
     the extremity of the tissue; `eptm.vert_df['delta_rho']` is computed as the

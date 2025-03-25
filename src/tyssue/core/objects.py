@@ -1,20 +1,17 @@
 """
 Core definitions
 """
-import logging
 import warnings
+import logging
 from collections import deque
-from copy import deepcopy
 from itertools import product
-
 import numpy as np
 import pandas as pd
-import networkx as nx
-
+from copy import deepcopy
+from ..utils.utils import set_data_columns, spec_updater
+from ..utils import connectivity
 from ..geometry.planar_geometry import PlanarGeometry
 from ..geometry.sheet_geometry import SheetGeometry
-from ..utils import connectivity
-from ..utils.utils import set_data_columns, spec_updater
 
 log = logging.getLogger(name=__name__)
 
@@ -151,17 +148,6 @@ class Epithelium:
         self.position_buffer = None
         self.topo_changed = False
         self.is_ordered = False
-
-        # Add columns of unique_id in order to follow topology change
-        # Add last unique index value in specs
-        for elem, df in self.datasets.items():
-            self.datasets[elem]['unique_id'] = self.datasets[elem].index
-            self.specs[elem]['unique_id_max'] = self.datasets[elem].shape[0]
-
-        # Add cell lineage graphe
-        self.lineage = nx.DiGraph()
-        self.lineage.add_nodes_from([str(i) for i in self.datasets['face']['unique_id']],
-                                    color='grey')
 
     @property
     def vert_df(self):
@@ -332,7 +318,7 @@ class Epithelium:
 
     def _upcast(self, idx, df):
 
-        # Assumes a flat index
+        ## Assumes a flat index
         upcast = df.take(idx, axis=0)
         try:
             upcast.index = self.edge_df.index
@@ -490,57 +476,6 @@ class Epithelium:
         """
         return self._lvl_sum(df, "cell")
 
-    def _lvl_mean(self, df, lvl):
-        df_ = df
-        if isinstance(df, np.ndarray):
-            df_ = pd.DataFrame(df, index=self.edge_df.index)
-        elif isinstance(df, pd.Series):
-            df_ = df.to_frame()
-        elif lvl not in df.columns:
-            df_ = df.copy()
-        df_[lvl] = self.edge_df[lvl]
-        return df_.groupby(lvl).mean()
-
-    def mean_srce(self, df):
-        """Means the values of the edge-indexed dataframe `df` grouped by
-        the values of `self.edge_df["srce"]`
-
-        Returns
-        -------
-        mean : :class:`pd.DataFrame` the mean data, indexed by the source vertices.
-        """
-        return self._lvl_mean(df, "srce")
-
-    def mean_trgt(self, df):
-        """Means the values of the edge-indexed dataframe `df` grouped by
-        the values of `self.edge_df["trgt"]`
-
-        Returns
-        -------
-        mean : :class:`pd.DataFrame` the mean data, indexed by the source vertices.
-        """
-        return self._lvl_mean(df, "trgt")
-
-    def mean_face(self, df):
-        """Means the values of the edge-indexed dataframe `df` grouped by
-        the values of `self.edge_df["face"]`
-
-        Returns
-        -------
-        mean : :class:`pd.DataFrame` the mean data, indexed by the source vertices.
-        """
-        return self._lvl_mean(df, "face")
-
-    def mean_cell(self, df):
-        """Means the values of the edge-indexed dataframe `df` grouped by
-        the values of `self.edge_df["cell"]`
-
-        Returns
-        -------
-        mean : :class:`pd.DataFrame` the mean data, indexed by the source vertices.
-        """
-        return self._lvl_mean(df, "cell")
-
     def get_orbits(self, center, periph):
         """Returns a dataframe with a `(center, edge)` MultiIndex with `periph`
         elements.
@@ -671,7 +606,7 @@ class Epithelium:
 
         e.g. has only closed polygons and polyhedra
         """
-        return np.all(self.get_valid())
+        return np.alltrue(self.get_valid())
 
     def get_valid(self):
         """Set the 'is_valid' column to true if the faces are all closed polygons,
@@ -746,19 +681,7 @@ class Epithelium:
         if trim_borders:
             from ..topology.base_topology import merge_border_edges
 
-            try:
-                merge_border_edges(self)
-            except IndexError as err:
-                print(
-                    """An index problem prevents cutting
-This is sometimes due to degeneracies in vertices positions
-You can try jittering the epithelium with something like:
-   rdm_pos = np.random.normal(size=1e-6, shape=(sheet.Nv, sheet.ndim))
-   sheet.vert_df[sheet.coords] += pos
-and try what you where doing again
-"""
-                )
-                raise err
+            merge_border_edges(self)
         if order_edges:
             self.reset_index(order=True)
 
@@ -803,7 +726,7 @@ and try what you where doing again
         self.topo_changed = True
         # remove disconnected vertices and faces
         self.vert_df = self.vert_df.reindex(
-            set(self.edge_df.srce).union(set(self.edge_df.trgt))
+            set(self.edge_df.srce).union(self.edge_df.trgt)
         )
         self.face_df = self.face_df.reindex(set(self.edge_df.face))
 
@@ -938,14 +861,15 @@ and try what you where doing again
         cardinal = grouped.apply(len)
         if cardinal.max() > 2:
             raise ValueError(
-                "Invalid topology, the following faces have more than one neighbor: "
-                f"{face_v2[cardinal > 2].to_list()}"
+                "Invalid topology, the following faces have more than one neighbor: {}".format(
+                    face_v2[cardinal > 2].to_list()
+                )
             )
         self.face_df["opposite"] = -1
 
         face_pairs = (
             face_v2[cardinal == 2]
-            .groupby(level=0, group_keys=True)
+            .groupby(level=0)
             .apply(lambda df: dict(enumerate(df)))
             .values.reshape((-1, 2))
         )
@@ -954,12 +878,6 @@ and try what you where doing again
         self.face_df.loc[face_pairs[:, 0], "opposite"] = face_pairs[:, 1]
         self.face_df.loc[face_pairs[:, 1], "opposite"] = face_pairs[:, 0]
 
-    def ordered_edges(self):
-        """Returns "srce", "trgt", "face" and "edge" indices
-        organized clockwise for all faces
-        """
-        return self.edge_df.groupby("face").apply(_ordered_edges)
-
 
 def get_opposite_faces(eptm):
     warnings.warn("Deprecated, use `eptm.get_opposite_faces()` instead")
@@ -967,7 +885,7 @@ def get_opposite_faces(eptm):
 
 
 def _ordered_edges(face_edges):
-    """Returns "srce", "trgt" "face" and "edge" indices
+    """Returns "srce", "trgt" and "face" indices
     organized clockwise for each face.
 
     Parameters
@@ -978,17 +896,14 @@ def _ordered_edges(face_edges):
     Returns
     -------
     edges: list of 3 ints
-        srce, trgt, face, edge indices, ordered
+        srce, trgt, face indices, ordered
     """
-    face_edges = face_edges.copy()
-    face_edges["edge"] = face_edges.index
-    srces, trgts, faces, edge = face_edges[["srce", "trgt", "face", "edge"]].values.T
-    srce, trgt, face_, edge_ = srces[0], trgts[0], faces[0], edge[0]
-    edges = [[srce, trgt, face_, edge_]]
+    srces, trgts, faces = face_edges[["srce", "trgt", "face"]].values.T
+    srce, trgt, face_ = srces[0], trgts[0], faces[0]
+    edges = [[srce, trgt, face_]]
     for face_ in faces[1:]:
         srce, trgt = trgt, trgts[srces == trgt][0]
-        edge_ = face_edges[(face_edges["srce"] == srce)]["edge"].to_numpy()[0]
-        edges.append([srce, trgt, face_, edge_])
+        edges.append([srce, trgt, face_])
     return edges
 
 

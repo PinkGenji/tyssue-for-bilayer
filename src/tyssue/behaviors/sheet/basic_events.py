@@ -4,22 +4,25 @@ Small event module
 
 
 """
+import numpy as np
 import logging
 
+logger = logging.getLogger(__name__)
+
+
+from ...utils.decorators import face_lookup
 from ...geometry.sheet_geometry import SheetGeometry
 from ...topology.sheet_topology import cell_division
-from ...utils.decorators import face_lookup
-from .actions import (
-    decrease,
-    detach_vertices,
-    exchange,
-    increase,
-    increase_linear_tension,
-    merge_vertices,
-    remove,
-)
 
-logger = logging.getLogger(__name__)
+from .actions import (
+    exchange,
+    remove,
+    merge_vertices,
+    detach_vertices,
+    increase,
+    decrease,
+    increase_linear_tension,
+)
 
 
 def reconnect(sheet, manager, **kwargs):
@@ -31,8 +34,7 @@ def reconnect(sheet, manager, **kwargs):
     -----------------
     threshold_length : the threshold length at which vertex merging is performed
     p_4 : the probability per unit time to perform a detachement from a rank 4 vertex
-    p_5p : the probability per unit time to perform a detachement from a rank 5
-        or more vertex
+    p_5p : the probability per unit time to perform a detachement from a rank 5 or more vertex
 
 
     See Also
@@ -94,6 +96,8 @@ def division(sheet, manager, **kwargs):
 
     division_spec["critical_vol"] *= sheet.specs["face"]["prefered_vol"]
 
+    print(sheet.face_df.loc[face, "vol"], division_spec["critical_vol"])
+
     if sheet.face_df.loc[face, "vol"] < division_spec["critical_vol"]:
         increase(
             sheet, "face", face, division_spec["growth_rate"], "prefered_vol", True
@@ -102,14 +106,6 @@ def division(sheet, manager, **kwargs):
     else:
         daughter = cell_division(sheet, face, division_spec["geom"])
         sheet.face_df.loc[daughter, "id"] = sheet.face_df.id.max() + 1
-
-        sheet.face_df.loc[daughter, "unique_id"] = sheet.specs['face']['unique_id_max']+1
-        sheet.specs['face']['unique_id_max'] += 1
-
-        sheet.lineage.add_node(str(sheet.face_df.loc[daughter]['unique_id']),
-                               color='grey')
-        sheet.lineage.add_edge(str(sheet.face_df.loc[face]['unique_id']),
-                               str(sheet.face_df.loc[daughter]['unique_id']))
 
 
 default_contraction_spec = {

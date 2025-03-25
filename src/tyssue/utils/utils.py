@@ -1,7 +1,6 @@
-import logging
 import warnings
-
 import numpy as np
+import logging
 import pandas as pd
 
 logger = logging.getLogger(name=__name__)
@@ -66,6 +65,7 @@ def spec_updater(specs, new):
             specs[key] = new[key]
 
 
+
 def set_data_columns(datasets, specs, reset=False):
     """Sets the columns of the dataframes in the datasets dictionnary to
     the uniform values in the specs sub-dictionnaries.
@@ -96,14 +96,14 @@ def set_data_columns(datasets, specs, reset=False):
             continue
         for col, default in spec.items():
             if col in df.columns and reset:
-                logger.info(
-                    "Reseting column %s of the %s dataset with new specs", col, name
+                logger.warning(
+                    "Reseting column %s of the %s" " dataset with new specs", col, name
                 )
             if col not in df.columns or reset:
                 df[col] = default
 
 
-def data_at_opposite(sheet, edge_data, free_value=None, column=""):
+def data_at_opposite(sheet, edge_data, free_value=None):
     """
     Returns a pd.DataFrame with the values of the input edge_data
     at the opposite edges. For free edges, optionaly replaces Nan values
@@ -113,8 +113,6 @@ def data_at_opposite(sheet, edge_data, free_value=None, column=""):
     ----------
     sheet: a :class:`Sheet` instance
     edge_data:  dataframe contain value of edge
-    free_value: value used to replace Nan
-    column: string: column name so store opposite value in Sheet.edge_df
 
     Returns
     -------
@@ -138,10 +136,8 @@ def data_at_opposite(sheet, edge_data, free_value=None, column=""):
         )
     if free_value is not None:
         opposite = opposite.replace(np.nan, free_value)
-    if column:
-        sheet.edge_df[column] = opposite
-    else:
-        return opposite
+
+    return opposite
 
 
 def get_sub_eptm(eptm, edges, copy=False):
@@ -165,10 +161,10 @@ def get_sub_eptm(eptm, edges, copy=False):
         warnings.warn("Sub epithelium appears to be empty")
         return None
     datasets["edge"] = edge_df
-    datasets["vert"] = eptm.vert_df.loc[np.unique(edge_df["srce"])]
-    datasets["face"] = eptm.face_df.loc[np.unique(edge_df["face"])]
+    datasets["vert"] = eptm.vert_df.loc[set(edge_df["srce"])]
+    datasets["face"] = eptm.face_df.loc[set(edge_df["face"])]
     if "cell" in eptm.datasets:
-        datasets["cell"] = eptm.cell_df.loc[np.unique(edge_df["cell"])]
+        datasets["cell"] = eptm.cell_df.loc[set(edge_df["cell"])]
 
     if copy:
         for elem, df in datasets.items():
@@ -182,10 +178,10 @@ def get_sub_eptm(eptm, edges, copy=False):
     if "cell" in eptm.datasets:
         sub_eptm.datasets["edge"]["cell_o"] = edge_df["cell"]
 
-    sub_eptm.datasets["vert"]["srce_o"] = np.unique(edge_df["srce"])
-    sub_eptm.datasets["face"]["face_o"] = np.unique(edge_df["face"])
+    sub_eptm.datasets["vert"]["srce_o"] = set(edge_df["srce"])
+    sub_eptm.datasets["face"]["face_o"] = set(edge_df["face"])
     if "cell" in eptm.datasets:
-        sub_eptm.datasets["cell"]["cell_o"] = np.unique(edge_df["cell"])
+        sub_eptm.datasets["cell"]["cell_o"] = set(edge_df["cell"])
 
     sub_eptm.reset_index()
     sub_eptm.reset_topo()
@@ -237,6 +233,8 @@ def scaled_unscaled(func, scale, eptm, geom, args=(), kwargs={}, coords=None):
     geom.update_all(eptm)
     try:
         res = func(*args, **kwargs)
+    except:
+        raise
     finally:
         geom.scale(eptm, 1 / scale, coords)
         geom.update_all(eptm)
@@ -329,7 +327,7 @@ def get_next(eptm):
     return next_
 
 
-# small utlity to swap apical and basal segments
+## small utlity to swap apical and basal segments
 def swap_apico_basal(organo):
     """Swap apical and basal segments of an organoid."""
     for elem in ["vert", "face", "edge"]:
@@ -359,25 +357,22 @@ def elem_centered_patch(eptm, elem_idx, neighbour_order, elem):
     if elem not in ("face", "cell"):
         raise ValueError
 
-    elems = pd.concat(
-        [
-            pd.Series(elem_idx),
-            eptm.get_neighborhood(elem_idx, neighbour_order, elem)[elem],
-        ]
+    elems = pd.Series(elem_idx).append(
+        eptm.get_neighborhood(elem_idx, neighbour_order, elem)[elem]
     )
     print(elems, elem)
     edges = eptm.edge_df[eptm.edge_df[elem].isin(elems)].copy()
 
-    vertices = eptm.vert_df.loc[np.unique(edges["srce"])].copy()
+    vertices = eptm.vert_df.loc[set(edges["srce"])].copy()
 
     if elem == "cell":
-        faces = eptm.face_df.loc[np.unique(edges["face"])].copy()
+        faces = eptm.face_df.loc[set(edges["face"])].copy()
         cells = eptm.cell_df.loc[elems].copy()
 
     elif "cell" in edges.columns:
 
         faces = eptm.face_df.loc[elems].copy()
-        cells = eptm.cell_df.loc[np.unique(edges["cell"])].copy()
+        cells = eptm.cell_df.loc[set(edges["cell"])].copy()
     else:
         faces = eptm.face_df.loc[elems].copy()
         cells = None

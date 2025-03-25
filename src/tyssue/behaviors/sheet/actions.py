@@ -6,17 +6,17 @@ Basic event module
 """
 
 import logging
-import warnings
-
 import numpy as np
-
-from ...core.sheet import Sheet
 from ...topology.base_topology import collapse_edge
-from ...topology.bulk_topology import split_vert as bulk_split
-from ...topology.sheet_topology import remove_face
+from ...topology.sheet_topology import remove_face, type1_transition
 from ...topology.sheet_topology import split_vert as sheet_split
-from ...topology.sheet_topology import type1_transition
+from ...topology.bulk_topology import split_vert as bulk_split
+
+from ...geometry.sheet_geometry import SheetGeometry
+from ...core.sheet import Sheet
 from ...utils import connectivity
+
+import warnings
 
 logger = logging.getLogger(__name__)
 
@@ -108,9 +108,7 @@ def increase(sheet, element, index, increase_rate, col, multiply=True, bound=Non
     index : index in the datasets[element]
     increase_rate : rate use to multiply value in the column col.
     col : column from dataset which apply increase_rate.
-    multiply : bool:
-        if True, the current col value is multiplied by increase_rate.
-        if False it is added. Default True.
+    multiply : bool: if true, the current col value is multiplied by increase_rate. if false it is added. Default multiply.
     bound: Higher limit of the modify value. Default None
     """
     if multiply:
@@ -135,8 +133,7 @@ def decrease(sheet, element, index, decrease_rate, col, divide=True, bound=None)
     index : index in the datasets[element]
     decrease_rate : rate use to divide value in the column col.
     col : column from element which apply decrease_rate.
-    divide : bool: if true the current col value is divide by decrease_rate.
-        If false it is substracted. Default divide.
+    divide : bool: if true the current col value is divide by decrease_rate. If false it is substracted. Default divide.
     bound: lower limit of the modify value. Default None.
     """
     if divide:
@@ -192,8 +189,7 @@ def ab_pull(sheet, face, radial_tension, distributed=False):
     sheet : a :class:`Sheet` object
     face : index of face
     radial_tension :
-    distributed : bool: If true devide radial_tension by number of vertices,
-        and apply this new radial tension to each vertices. Default not distributed.
+    distributed : bool: If true devide radial_tension by number of vertices, and apply this new radial tension to each vertices. Default not distributed.
 
     """
     verts = sheet.edge_df[sheet.edge_df["face"] == face]["srce"].unique()

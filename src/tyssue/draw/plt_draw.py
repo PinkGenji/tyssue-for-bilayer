@@ -1,71 +1,28 @@
 """
 Matplotlib based plotting
 """
-import logging
-import pathlib
 import shutil
-import subprocess
+import glob
 import tempfile
+import subprocess
 import warnings
+import pathlib
 
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import numpy as np
+
 import pandas as pd
-from ipywidgets import interactive
-from matplotlib import colormaps
-from matplotlib.collections import LineCollection, PatchCollection, PolyCollection
-from matplotlib.patches import Arc, FancyArrow, PathPatch
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+from matplotlib import cm
 from matplotlib.path import Path
+from matplotlib.patches import FancyArrow, Arc, PathPatch
+from matplotlib.collections import PatchCollection, PolyCollection, LineCollection
 
 from ..config.draw import sheet_spec
-from ..utils.utils import get_sub_eptm, spec_updater
+from ..utils.utils import spec_updater, get_sub_eptm
 
 COORDS = ["x", "y"]
-
-log = logging.getLogger(__name__)
-
-
-def browse_history(
-    history,
-    coords=["x", "y"],
-    start=None,
-    stop=None,
-    size=None,
-    draw_func=None,
-    margin=5,
-    **draw_kwds,
-):
-    """Returns a browser widget with 2D plots of the epithelium"""
-    if draw_func is None:
-        if draw_kwds.get("mode") in ("quick", None):
-            draw_func = quick_edge_draw
-        else:
-            draw_func = sheet_view
-
-    times = history.slice(start, stop, size)
-    size = times.size
-    x, y = coords = draw_kwds.get("coords", history.sheet.coords[:2])
-
-    sheet0 = history.retrieve(0)
-    bounds = sheet0.vert_df[coords].describe().loc[["min", "max"]]
-    delta = (bounds.loc["max"] - bounds.loc["min"]).max()
-    margin = delta * margin / 100
-    xlim = bounds.loc["min", x] - margin, bounds.loc["max", x] + margin
-    ylim = bounds.loc["min", y] - margin, bounds.loc["max", y] + margin
-
-    def set_frame(i=0):
-        t = times[i]
-        sheet = history.retrieve(t)
-        fig = plt.figure(2)
-        ax = fig.subplots()
-        fig, ax = draw_func(sheet, ax=ax, **draw_kwds)
-        ax.set(xlim=xlim, ylim=ylim)
-        plt.show()
-
-    widget = interactive(set_frame, i=(0, size - 1))
-    widget.layout.height = "500px"
-    return widget
 
 
 def create_gif(
@@ -100,6 +57,16 @@ def create_gif(
     """
     if draw_func is None:
         draw_func = sheet_view
+        draw_kwds.update({"mode": "quick"})
+
+    time_stamps = history.time_stamps
+    if num_frames is not None:
+        times = np.linspace(time_stamps[0], time_stamps[-1], num_frames)
+    elif interval is not None:
+        times = time_stamps[interval[0] : interval[1] + 1]
+        num_frames = len(times)
+    else:
+        raise ValueError("Need to define `num_frames` or `interval` parameters.")
 
     graph_dir = pathlib.Path(tempfile.mkdtemp())
     x, y = coords = draw_kwds.get("coords", history.sheet.coords[:2])
@@ -110,26 +77,38 @@ def create_gif(
     xlim = bounds.loc["min", x] - margin, bounds.loc["max", x] + margin
     ylim = bounds.loc["min", y] - margin, bounds.loc["max", y] + margin
 
-    if interval is None:
-        start, stop = None, None
-    else:
-        start, stop = interval[0], interval[1]
-
-    for i, (t, sheet) in enumerate(history.browse(start, stop, num_frames)):
-        try:
+    if len(history) < num_frames:
+        for i, (t_, sheet) in enumerate(history):
             fig, ax = draw_func(sheet, **draw_kwds)
-        except Exception as e:
-            print(f"Droped frame {i}")
-            print(e)
-            continue
+            if isinstance(ax, plt.Axes) and margin >= 0:
+                ax.set(xlim=xlim, ylim=ylim)
+            fig.savefig(graph_dir / f"sheet_{i:03d}")
+            plt.close(fig)
 
-        if isinstance(ax, plt.Axes) and margin >= 0:
-            ax.set(xlim=xlim, ylim=ylim)
-        fig.savefig(graph_dir / f"movie_{i:04d}.png")
-        plt.close(fig)
+            figs = glob.glob((graph_dir / "sheet_*.png").as_posix())
+            figs.sort()
+
+        for i, t in enumerate(times):
+            index = np.where(time_stamps >= t)[0][0]
+            fig = figs[index]
+            shutil.copy(fig, graph_dir / f"movie_{i:04d}.png")
+    else:
+        for i, t in enumerate(times):
+            sheet = history.retrieve(t)
+            try:
+                fig, ax = draw_func(sheet, **draw_kwds)
+            except Exception as e:
+                print("Droped frame {i}")
+
+            if isinstance(ax, plt.Axes) and margin >= 0:
+                ax.set(xlim=xlim, ylim=ylim)
+            fig.savefig(graph_dir / f"movie_{i:04d}.png")
+            plt.close(fig)
 
     try:
-        subprocess.run(["convert", (graph_dir / "movie_*.png").as_posix(), output])
+        proc = subprocess.run(
+            ["convert", (graph_dir / "movie_*.png").as_posix(), output]
+        )
     except Exception as e:
         print(
             "Converting didn't work, make sure imagemagick is available on your system"
@@ -140,77 +119,41 @@ def create_gif(
         shutil.rmtree(graph_dir)
 
 
-def sheet_view(sheet, coords=COORDS, ax=None, cbar_axis=None, **draw_specs_kw):
+def sheet_view(sheet, coords=COORDS, ax=None, **draw_specs_kw):
     """Base view function, parametrizable
     through draw_secs
+
     The default sheet_spec specification is:
-    {
-        "edge": {
-            "visible": true,
-            "width": 0.5,
-            "head_width": 0.0,
-            "length_includes_head": true,
-            "shape": "right",
-            "color": "#2b5d0a",
-            "alpha": 0.8,
-            "zorder": 1,
-            "colormap": "viridis"
-        },
-        "vert": {
-            "visible": false,
-            "s": 100,
-            "color": "#000a4b",
-            "alpha": 0.3,
-            "zorder": 2
-        },
-        "grad": {
-            "color":"#000a4b",
-            "alpha":0.5,
-            "width":0.04
-        },
-        "face": {
-            "visible": false,
-            "color":"#8aa678",
-            "alpha": 1.0,
-            "zorder": -1
-        },
-        "axis": {
-            "autoscale": true,
-            "color_bar": false,
-            "color_bar_cmap":"viridis",
-            "color_bar_range":false,
-            "color_bar_label":false,
-            "color_bar_target":"face"
-        }
-    }
 
-    Note
-    ----
-
-    Important note for quantitative colormap plots: make sure to normalize your
-    values before getting the colors using
-
-         draw_specs["face"]["color"] = cmap(pandas_holding_quantity_of_interest)
-
-    For each plot normalize with respect to the current values
-    (max and min) such that they lie between and including 0 to 1.
-    Note that if you want to keep a constant colorbar range you have
-    to choose the normalization to match the max and min of the color
-    bar range you chose.
+    {'edge': {
+      'visible': True,
+      'width': 0.5,
+      'head_width': 0.2, # arrow head width for the edges
+      'length_includes_head': True, # see matplotlib Arrow artist doc
+      'shape': 'right',
+      'color': '#2b5d0a', # can be an array
+      'alpha': 0.8,
+      'zorder': 1,
+      'colormap': 'viridis'},
+     'vert': {
+      'visible': True,
+      's': 100,
+      'color': '#000a4b',
+      'alpha': 0.3,
+      'zorder': 2},
+     'face': {
+      'visible': False,
+      'color': '#8aa678',
+      'alpha': 1.0,
+      'zorder': -1}
+      }
     """
     draw_specs = sheet_spec()
     spec_updater(draw_specs, draw_specs_kw)
-
-    if (ax is None) and (cbar_axis is None):
-        fig = plt.figure()
-        grid0 = plt.GridSpec(10, 10)
-        grid0.update(wspace=0.0)
-        ax = fig.add_subplot(grid0[:, :9])
+    if ax is None:
+        fig, ax = plt.subplots()
     else:
-        if ax is None:
-            fig, ax = plt.subplots()
-        else:
-            fig = ax.get_figure()
+        fig = ax.get_figure()
 
     vert_spec = draw_specs["vert"]
     if vert_spec["visible"]:
@@ -224,42 +167,9 @@ def sheet_view(sheet, coords=COORDS, ax=None, cbar_axis=None, **draw_specs_kw):
     if face_spec["visible"]:
         ax = draw_face(sheet, coords, ax, **face_spec)
 
-    axis_spec = draw_specs.get("axis", {})
-    if axis_spec.get("autoscale"):
-        ax.autoscale()
-        ax.set_aspect("equal")
-    else:
-        ax.set_xlim(axis_spec["x_min"], axis_spec["x_max"])
-        ax.set_ylim(axis_spec["y_min"], axis_spec["y_max"])
-        ax.set_aspect("equal")
-
-    if not axis_spec.get("color_bar"):
-        return fig, ax
-    else:
-        cbar_axis = fig.add_subplot(grid0[:, 9])
-        cmap = colormaps[axis_spec.get("color_bar_cmap")]
-        if not axis_spec.get("color_bar_range"):
-            warnings.warn(
-                """Since the quanity of interest should be normalized
-to pick face colours, color bar range should always be specified
-according to the normalization used. Default 0 to 1 range is used.
-"""
-            )
-            norm = mpl.colors.Normalize(0.0, 1.0)
-        else:
-            norm = mpl.colors.Normalize(
-                vmin=axis_spec.get("color_bar_range")[0],
-                vmax=axis_spec.get("color_bar_range")[1],
-            )
-
-        cb1 = mpl.colorbar.ColorbarBase(
-            cbar_axis, cmap=cmap, norm=norm, orientation="vertical"
-        )
-        if not axis_spec.get("color_bar_label"):
-            cb1.set_label("a.u.")
-        else:
-            cb1.set_label(axis_spec.get("color_bar_label"))
-        return fig, ax
+    ax.autoscale()
+    ax.set_aspect("equal")
+    return fig, ax
 
 
 def draw_face(sheet, coords, ax, **draw_spec_kw):
@@ -320,7 +230,7 @@ def parse_face_specs(face_draw_specs, sheet):
 
 def _face_color_from_sequence(face_spec, sheet):
     color_ = face_spec["color"]
-    cmap = colormaps[face_spec.get("colormap", "viridis")]
+    cmap = cm.get_cmap(face_spec.get("colormap", "viridis"))
     color_min, color_max = face_spec.get("color_range", (color_.min(), color_.max()))
 
     if color_.shape in [(sheet.Nf, 3), (sheet.Nf, 4)]:
@@ -328,7 +238,7 @@ def _face_color_from_sequence(face_spec, sheet):
 
     elif color_.shape == (sheet.Nf,):
         if np.ptp(color_) < 1e-10:
-            log.info("Attempting to draw a colormap " "with a uniform value")
+            warnings.warn("Attempting to draw a colormap " "with a uniform value")
             return np.ones((sheet.Nf, 3)) * 0.5
 
         normed = (color_ - color_min) / (color_max - color_min)
@@ -372,9 +282,7 @@ def draw_edge(sheet, coords, ax, **draw_spec_kw):
             FancyArrow(*edge[[sx, sy, dx, dy]], **arrow_specs)
             for idx, edge in sheet.edge_df[app_length > 1e-6].iterrows()
         ]
-        ax.add_collection(
-            PatchCollection(patches, match_original=False, **collections_specs)
-        )
+        ax.add_collection(PatchCollection(patches, **collections_specs))
     else:
         segments = sheet.edge_df[[sx, sy, tx, ty]].to_numpy().reshape((-1, 2, 2))
         ax.add_collection(LineCollection(segments, **collections_specs))
@@ -416,7 +324,7 @@ def _wire_color_from_sequence(edge_spec, sheet):
     color_ = edge_spec["color"]
 
     color_min, color_max = edge_spec.get("color_range", (color_.min(), color_.max()))
-    cmap = colormaps[edge_spec.get("colormap", "viridis")]
+    cmap = cm.get_cmap(edge_spec.get("colormap", "viridis"))
     if color_.shape in [(sheet.Nv, 3), (sheet.Nv, 4)]:
         return (sheet.upcast_srce(color_) + sheet.upcast_trgt(color_)) / 2
     elif color_.shape == (sheet.Nv,):
@@ -494,17 +402,17 @@ def plot_forces(
     else:
         grad_i = model.compute_gradient(sheet, components=False) * scaling
         grad_i = grad_i.loc[sheet.vert_df["is_active"].astype(bool)]
-    sheet.vert_df[gcoords] = -grad_i[gcoords]  # F = -grad E
+    sheet.vert_df[gcoords]=-grad_i[gcoords] # F = -grad E
 
-    if "extract" in draw_specs:
-        sheet = sheet.extract_bounding_box(**draw_specs["extract"])
+    if 'extract' in draw_specs:
+        sheet = sheet.extract_bounding_box(**draw_specs['extract'])
 
     if ax is None:
         fig, ax = quick_edge_draw(sheet, coords)
     else:
         fig = ax.get_figure()
 
-    arrows = sheet.vert_df[coords + gcoords]
+    arrows = sheet.vert_df[coords+gcoords]
     for _, arrow in arrows.iterrows():
         ax.arrow(*arrow, **draw_specs["grad"])
     return fig, ax
@@ -618,11 +526,11 @@ def plot_junction(eptm, edge_index, coords=["x", "y"]):
 
     ax.scatter(*eptm.vert_df.loc[v10_out, coords].values.T)
     ax.scatter(*eptm.vert_df.loc[v11_out, coords].values.T)
-    x, y = coords
+
     for _, edge in eptm.edge_df.query(f"srce == {v10}").iterrows():
         ax.plot(
-            edge[["s" + x, "t" + x]],
-            edge[["s" + y, "t" + y]],
+            edge[["s" + coords[0], "t" + coords[0]]],
+            edge[["s" + coords[1], "t" + coords[1]]],
             lw=3,
             alpha=0.3,
             c="r",
@@ -630,8 +538,8 @@ def plot_junction(eptm, edge_index, coords=["x", "y"]):
 
     for _, edge in eptm.edge_df.query(f"srce == {v11}").iterrows():
         ax.plot(
-            edge[["s" + x, "t" + x]],
-            edge[["s" + y, "t" + y]],
+            edge[["s" + coords[0], "t" + coords[0]]],
+            edge[["s" + coords[1], "t" + coords[1]]],
             "k--",
         )
 
@@ -640,8 +548,8 @@ def plot_junction(eptm, edge_index, coords=["x", "y"]):
             if edge["trgt"] in {v10, v11}:
                 continue
             ax.plot(
-                edge[["s" + x, "t" + x]],
-                edge[["s" + y, "t" + y]],
+                edge[["s" + coords[0], "t" + coords[0]]],
+                edge[["s" + coords[1], "t" + coords[1]]],
                 "k",
                 lw=0.4,
             )
